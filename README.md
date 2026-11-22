@@ -464,7 +464,7 @@ Respuesta de salud observada:
 
 - `.env` y los respaldos SQL deben mantenerse fuera de Git. El archivo `.env.example` solo incluye marcadores.
 - Las credenciales de laboratorio utilizadas durante la reparación quedaron anteriormente visibles en commits/capturas. **No deben reutilizarse en otros servicios**. Si son credenciales reales, requieren rotación y tratamiento del historial expuesto.
-- El archivo `backend/main.py` conserva un valor predeterminado de conexión en el código original. La ejecución mediante Compose utiliza la variable `DATABASE_URL`; como mejora de seguridad adicional, conviene eliminar el valor de respaldo embebido y exigir la variable en todos los modos de ejecución.
+- **Corrección de seguridad aplicada:** se eliminó de `backend/main.py` la URL de conexión predeterminada que contenía credenciales de laboratorio. El backend ahora exige `DATABASE_URL` mediante una variable de entorno y falla explícitamente si no está configurada. Commit `f6c261f`. Esta corrección no borra las credenciales registradas en commits anteriores.
 - PostgreSQL y FastAPI no se publican directamente en puertos del host en la configuración actual; se accede a la API a través de Nginx.
 - La solución está diseñada para una evaluación Docker Compose. No incluye Kubernetes, pipeline CI/CD, copias programadas, monitoreo centralizado ni despliegue productivo endurecido.
 - La inicialización automática de `items` en el evento de inicio no sustituye un sistema completo de migraciones de base de datos.
