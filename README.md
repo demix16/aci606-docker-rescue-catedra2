@@ -15,7 +15,7 @@ El sistema permite visualizar el estado de la API y su conexión a PostgreSQL, c
 | Frontend | Nginx 1.27 Alpine + HTML/CSS/JavaScript | Servir la interfaz web y actuar como proxy inverso para `/api/` |
 | Backend | Python 3.12, FastAPI, Uvicorn y SQLAlchemy | Exponer la API REST, validar los datos y ejecutar operaciones SQL |
 | Base de datos | PostgreSQL 16 Alpine | Almacenar los registros en la tabla `items` |
-| Orquestación local | Docker Compose | Construir imágenes, crear servicios, conectar la red y montar el volumen persistente |
+| Orquestación local | Docker Compose | Construir imágenes, conectar servicios, comprobar su salud y gestionar el volumen persistente |
 
 ### 1.1 Arquitectura y tráfico
 
@@ -33,6 +33,8 @@ flowchart LR
 
 **Proxy inverso:** Nginx recibe `/api/health` y lo remite a `http://backend:8000/health`. La barra final de `proxy_pass http://backend:8000/;` es relevante para esta reescritura de rutas.
 
+**Orden de arranque verificado (R-07):** al ejecutar Compose, PostgreSQL debe pasar su comprobación `pg_isready` antes de que empiece FastAPI. El frontend espera a que el healthcheck del backend responda correctamente. Este control se configura mediante `depends_on` con `condition: service_healthy` y evita la falla de conexión inicial detectada en un Codespace nuevo.
+
 ### 1.2 Estructura del repositorio
 
 ```text
@@ -45,10 +47,10 @@ aci606-docker-rescue-catedra2/
 │   ├── Dockerfile            # Imagen Nginx y archivos estáticos
 │   ├── index.html            # Interfaz web y solicitudes fetch
 │   └── nginx.conf            # Nginx y proxy de /api/
-├── compose.yaml              # Servicios, red, volumen y healthcheck
+├── compose.yaml              # Servicios, volumen, healthchecks y dependencias saludables
 ├── .env.example              # Plantilla de variables, sin secretos reales
 ├── .gitignore                # Excluye .env y el respaldo SQL local
-├── BITACORA.md               # Aclaración y trazabilidad de reparaciones
+├── BITACORA.md               # Diagnóstico y reparaciones R-01 a R-07
 └── README.md                 # Manual de construcción, uso y verificación
 ```
 
@@ -119,9 +121,12 @@ docker compose ps
 - `--build` construye las imágenes de frontend y backend a partir de sus Dockerfiles.
 - `-d` deja los servicios ejecutándose en segundo plano.
 - Se esperan los servicios `frontend`, `backend` y `db`.
-- El servicio backend debe mostrar **`healthy`** después de superar el período inicial de su healthcheck. El estado inicial `health: starting` es transitorio.
+- PostgreSQL (`db`) y FastAPI (`backend`) deben mostrar **`healthy`** después de superar sus respectivos healthchecks; Nginx (`frontend`) debe aparecer `Up`.
+- Compose espera a que la base de datos esté saludable antes de iniciar el backend, y a que el backend esté saludable antes de iniciar Nginx.
 
-**Precisión:** `depends_on` en la configuración actual establece un orden de inicio, pero no exige por sí solo que las dependencias estén sanas. La verificación efectiva se realiza con el healthcheck y las solicitudes HTTP.
+**Corrección R-07:** inicialmente, al probar el repositorio en un Codespace nuevo, `backend` terminaba en `Exited (3)` con `connection to server at "db" ... port 5432 failed: Connection refused`. PostgreSQL acababa de crearse y todavía no estaba listo. Tras agregar el healthcheck a `db` y `depends_on: condition: service_healthy`, el inicio con un único `docker compose up --build -d` completó la secuencia sin usar `docker compose start backend` manualmente.
+
+**Importante:** `depends_on` con `service_healthy` controla la preparación durante el arranque; no reinicia automáticamente un servicio que se detenga en cualquier momento posterior. Para verificar el funcionamiento real, también hay que ejecutar las solicitudes HTTP de la sección 4.
 
 ### 3.4 Abrir la interfaz web
 
@@ -247,29 +252,50 @@ docker compose exec -T db psql -v ON_ERROR_STOP=1 -U appuser -d appdb < respaldo
 
 **No repetir la restauración sobre una tabla ya creada**, porque un respaldo con instrucciones `CREATE TABLE` puede producir `relation "items" already exists`.
 
-## 6. Healthcheck y observabilidad
+## 6. Healthchecks, dependencias y observabilidad
 
-El servicio `backend` define una comprobación funcional en Compose. Ejecuta Python con `urllib.request` para consultar `http://127.0.0.1:8000/health` **dentro del contenedor**.
+En la versión final, `compose.yaml` incluye dos comprobaciones de salud:
 
-| Parámetro | Valor | Función |
-|---|---|---|
-| `interval` | `10s` | Periodicidad de cada comprobación |
-| `timeout` | `5s` | Tiempo máximo por intento |
-| `retries` | `5` | Fallos consecutivos necesarios para marcarlo como `unhealthy` |
-| `start_period` | `15s` | Tolerancia durante el arranque |
+- **PostgreSQL (`db`):** ejecuta `pg_isready` dentro del contenedor para comprobar que el servidor acepta conexiones. Usa `interval: 5s`, `timeout: 5s`, `retries: 10` y `start_period: 10s`.
+- **FastAPI (`backend`):** utiliza Python `urllib.request` para consultar `http://127.0.0.1:8000/health` dentro del propio contenedor. Usa `interval: 10s`, `timeout: 5s`, `retries: 5` y `start_period: 15s`.
 
-La ruta `/health` comprueba la base de datos ejecutando `SELECT 1`; si hay un error en la conexión, la API devuelve `503` y el healthcheck falla. El estado `healthy` indica que la comprobación configurada funciona, **no** que todos los recorridos de usuario estén cubiertos por pruebas.
+La ruta `/health` del backend ejecuta `SELECT 1` en PostgreSQL; si ocurre un problema de conexión, informa un error y su healthcheck no se supera.
+
+### 6.1 Dependencias entre servicios
+
+```yaml
+frontend:
+  depends_on:
+    backend:
+      condition: service_healthy
+
+backend:
+  depends_on:
+    db:
+      condition: service_healthy
+```
+
+La configuración anterior es un **extracto** para explicar las dependencias; el archivo completo se encuentra en `compose.yaml`. Primero se espera la salud de PostgreSQL, después la de FastAPI y finalmente se inicia Nginx.
+
+Esta mejora se incorporó después de detectar una condición de carrera en el primer arranque de un Codespace nuevo. Con el `depends_on` anterior, los contenedores podían iniciar en orden sin que la base de datos aceptara conexiones todavía.
+
+### 6.2 Consultar el estado y los logs
 
 ```bash
 docker compose ps
+docker compose ps -a
+docker compose logs --tail=80 db
 docker compose logs --tail=80 backend
 ```
 
-Inspección del estado de salud del contenedor backend:
+Inspeccionar los resultados internos de los healthchecks:
 
 ```bash
+docker inspect --format '{{json .State.Health}}' "$(docker compose ps -q db)"
 docker inspect --format '{{json .State.Health}}' "$(docker compose ps -q backend)"
 ```
+
+El estado `healthy` informa que pasó la comprobación configurada, no que todas las funciones de la aplicación hayan sido probadas. La respuesta HTTP 200 de `/api/health` y las operaciones con `/api/items` permiten validar el recorrido real de la API.
 
 ## 7. Diagnóstico de incidencias y trazabilidad
 
@@ -283,8 +309,9 @@ Para cada incidencia de Cátedra 2 documentar **síntoma → evidencia → causa
 | R-04 | `password authentication failed for user "appuser"` | Credenciales del backend y PostgreSQL inconsistentes | Se igualaron las credenciales del entorno | Uvicorn completó el arranque y el backend pasó a `Up` |
 | R-05 | La publicación `8080:8080` no coincidía con Nginx `listen 80` | Mapeo externo/interno incorrecto | `compose.yaml`: `8080:80` | `GET /` respondió `HTTP 200` |
 | R-06 | `GET /api/health` devolvía `502 Bad Gateway` | Nginx usaba `localhost:8000` como upstream | `frontend/nginx.conf`: `proxy_pass http://backend:8000/;` | `/api/health` y `/api/items` respondieron `HTTP 200` |
+| R-07 | En Codespace nuevo: backend `Exited (3)` y `Connection refused` a `db:5432` | `depends_on` simple iniciaba el backend antes de que PostgreSQL estuviera preparado | `compose.yaml`: healthcheck `pg_isready` y dependencias `condition: service_healthy` | Arranque automático con tres servicios `Up`, `db` y `backend` `healthy`, `/api/health` HTTP 200 |
 
-**Mejoras posteriores:** volumen nombrado para PostgreSQL; `.env` y `.env.example` para configuración; healthcheck del backend. Las pruebas de funcionamiento y persistencia se realizaron durante el trabajo. Las pruebas de fallo controlado y arranque en Codespace limpio deben registrarse cuando se ejecuten.
+**Mejoras posteriores:** volumen nombrado para PostgreSQL; `.env` y `.env.example` para configuración; healthcheck del backend y de PostgreSQL; dependencias `service_healthy`; README reproducible. Se verificaron comunicación, persistencia, fallo controlado, diagnóstico, recuperación y el arranque en un Codespace nuevo. La incidencia R-07 quedó registrada en el commit `c7535dd`.
 
 **Nota de historial:** `BITACORA.md` documenta un commit etiquetado accidentalmente como R-04 que en realidad correspondía al cambio R-05. Se conservó el commit original y se registró una aclaración, sin reescribir el historial compartido.
 
@@ -319,33 +346,29 @@ Para inspeccionar una red o volumen concreto, primero obtener su nombre real con
 
 ## 8. Prueba de fallo controlado y recuperación
 
-> **Procedimiento de validación pendiente de documentar con evidencia final.** Ejecutar sobre un entorno de prueba, no sobre un sistema en producción.
+Esta prueba **se ejecutó en el entorno de evaluación**. El objetivo fue observar el efecto de detener el backend mientras el frontend y la base de datos permanecían activos.
 
 ### 8.1 Estado anterior al fallo
 
 ```bash
 docker compose ps
-curl -i http://127.0.0.1:8080/api/health
+curl -i --max-time 10 http://127.0.0.1:8080/api/health
 ```
 
-Se espera backend `healthy` y respuesta HTTP `200`.
+Antes de la interrupción, el backend figuraba `healthy` y `/api/health` respondió `HTTP/1.1 200 OK`.
 
 ### 8.2 Simular fallo de backend
 
-Durante la interrupción controlada del backend, Nginx puede continuar entregando el contenido estático del frontend (`GET /`), mientras que las solicitudes dirigidas a `/api/` dejan de responder correctamente.
+```bash
+docker compose stop backend
+docker compose ps -a
+curl -i --max-time 5 http://127.0.0.1:8080/api/health
+docker compose logs --tail=50 frontend
+```
 
-Dependiendo del comportamiento del proxy inverso y del tiempo máximo configurado en el cliente HTTP, pueden observarse diferentes resultados:
+**Resultados observados:** el contenedor `backend` pasó a `Exited (0)`, mientras `frontend` y `db` continuaron `Up`. La solicitud a `/api/health` agotó los cinco segundos del cliente: `curl: (28) Operation timed out after 5002 milliseconds with 0 bytes received`. Los logs de Nginx registraron `499`, porque el cliente cerró su conexión antes de recibir respuesta.
 
-- `502 Bad Gateway`: Nginx no consigue obtener una respuesta válida del backend.
-- `curl: (28) Operation timed out`: el cliente agota su tiempo máximo de espera sin recibir una respuesta HTTP.
-- `499` en los logs de Nginx: el cliente cerró la conexión antes de que Nginx completara la respuesta.
-
-**Resultado observado durante la evaluación:** al detener el servicio `backend` mediante `docker compose stop backend`, la solicitud a `/api/health` agotó su tiempo de espera después de 5 segundos (`curl: (28)`). Los logs de Nginx registraron el código `499`.
-
-Posteriormente, el servicio se recuperó mediante `docker compose start backend`. Se verificó el estado `healthy` y la respuesta `HTTP/1.1 200 OK`, con `{"status":"ok","database":"reachable"}`.
-
-Esta prueba demuestra la identificación del fallo, su impacto sobre la comunicación entre servicios y la recuperación operativa del sistema.
-  
+En otras condiciones Nginx podría devolver un `502 Bad Gateway`, pero **no fue el código observado en esta prueba concreta**.
 
 ### 8.3 Recuperar
 
@@ -356,7 +379,7 @@ curl -i --max-time 10 http://127.0.0.1:8080/api/health
 curl -i --max-time 10 http://127.0.0.1:8080/api/items
 ```
 
-Verificar retorno a `healthy`, respuesta de salud HTTP `200` y registros disponibles. Si se consulta inmediatamente después del arranque, puede ser necesario volver a comprobar el estado antes de concluir que hay una falla.
+**Resultado observado:** el backend regresó a `Up (healthy)` y `/api/health` volvió a `HTTP/1.1 200 OK`, con `{"status":"ok","database":"reachable"}`. El escenario muestra la interrupción, el diagnóstico con logs y la recuperación. Si el backend acaba de reiniciarse, puede ser necesario comprobar su salud antes de consultar la API.
 
 ## 9. Detención, reconstrucción y reproducibilidad
 
@@ -366,7 +389,7 @@ Verificar retorno a `healthy`, respuesta de salud HTTP `200` y registros disponi
 | Reiniciar contenedores detenidos | `docker compose start` | Reutiliza los existentes |
 | Eliminar contenedores/red del proyecto | `docker compose down` | Mantiene el volumen nombrado por defecto |
 | Construir e iniciar/recrear servicios | `docker compose up --build -d` | Levanta la aplicación desde la configuración del repositorio |
-| Ver estado | `docker compose ps` | Muestra servicios y salud del backend |
+| Ver estado | `docker compose ps` | Muestra los servicios y los healthchecks de PostgreSQL y FastAPI |
 
 ### 9.1 Prueba desde un Codespace limpio (entrega)
 
@@ -380,16 +403,18 @@ Verificar retorno a `healthy`, respuesta de salud HTTP `200` y registros disponi
    docker compose ps
    ```
 
-4. Esperar el estado `healthy` del backend y validar:
+4. Comprobar que `db` y `backend` estén `healthy` y que `frontend` esté `Up`. Validar:
 
    ```bash
    curl -i http://127.0.0.1:8080/api/health
    curl -i http://127.0.0.1:8080/api/items
    ```
 
-5. Guardar capturas de los resultados reales de este Codespace limpio como evidencia para el informe.
+5. Guardar los comandos, resultados y capturas del arranque para el informe. Si se trata de un volumen nuevo, el resultado inicial de `GET /api/items` puede ser `[]`; esto no contradice la prueba de persistencia realizada en el Codespace anterior.
 
-**Nota sobre el criterio del profesor:** el comando obligatorio de arranque sigue siendo `docker compose up --build -d`. El paso previo de creación de `.env` es indispensable porque el repositorio no debe distribuir contraseñas operativas.
+**Resultado real de la validación (22-11-2026):** en un Codespace nuevo, la primera ejecución dejó el backend detenido porque intentó conectarse a PostgreSQL demasiado pronto. Después de aplicar la reparación R-07 y reiniciar los contenedores conservando el volumen, se ejecutó nuevamente `docker compose up --build -d`: la terminal informó `Container ...-db-1 Healthy`, `Container ...-backend-1 Healthy` y `Container ...-frontend-1 Started`. `docker compose ps` confirmó ambos healthchecks y `curl` a `/api/health` devolvió `HTTP/1.1 200 OK`. El commit final de esa reparación es `c7535dd`.
+
+**Nota sobre el criterio del profesor:** el comando obligatorio de arranque sigue siendo `docker compose up --build -d`. Crear `.env` a partir de `.env.example` es una preparación local indispensable, ya que el repositorio no distribuye contraseñas operativas. La ejecución final se realizó en ese Codespace nuevo con la base ya inicializada durante los intentos anteriores. Por tanto, demuestra que el arranque ahora funciona automáticamente en ese entorno, pero **no equivale todavía a repetir la prueba después de R-07 con un volumen totalmente nuevo**. No se debe afirmar que el primer intento sin R-07 funcionó.
 
 ## 10. Seguridad y limitaciones
 
