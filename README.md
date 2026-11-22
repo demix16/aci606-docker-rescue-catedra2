@@ -414,7 +414,51 @@ curl -i --max-time 10 http://127.0.0.1:8080/api/items
 
 **Resultado real de la validación (22-11-2026):** en un Codespace nuevo, la primera ejecución dejó el backend detenido porque intentó conectarse a PostgreSQL demasiado pronto. Después de aplicar la reparación R-07 y reiniciar los contenedores conservando el volumen, se ejecutó nuevamente `docker compose up --build -d`: la terminal informó `Container ...-db-1 Healthy`, `Container ...-backend-1 Healthy` y `Container ...-frontend-1 Started`. `docker compose ps` confirmó ambos healthchecks y `curl` a `/api/health` devolvió `HTTP/1.1 200 OK`. El commit final de esa reparación es `c7535dd`.
 
-**Nota sobre el criterio del profesor:** el comando obligatorio de arranque sigue siendo `docker compose up --build -d`. Crear `.env` a partir de `.env.example` es una preparación local indispensable, ya que el repositorio no distribuye contraseñas operativas. La ejecución final se realizó en ese Codespace nuevo con la base ya inicializada durante los intentos anteriores. Por tanto, demuestra que el arranque ahora funciona automáticamente en ese entorno, pero **no equivale todavía a repetir la prueba después de R-07 con un volumen totalmente nuevo**. No se debe afirmar que el primer intento sin R-07 funcionó.
+**Nota sobre el criterio del profesor:** el comando obligatorio de arranque sigue siendo `docker compose up --build -d`. Crear `.env` a partir de `.env.example` es una preparación local indispensable, ya que el repositorio no distribuye contraseñas operativas. La primera verificación después de R-07 se realizó en el Codespace nuevo con la base ya inicializada durante los intentos anteriores. Por tanto, ese resultado por sí solo no demostraba el arranque sobre un volumen vacío. **La prueba adicional con un proyecto Compose independiente y un volumen nuevo se realizó posteriormente y está documentada en la sección 9.2.** El primer intento sin R-07 falló y no debe presentarse como exitoso.
+
+### 9.2 Validación adicional con un volumen PostgreSQL nuevo (22-11-2026)
+
+**Objetivo:** comprobar el arranque completo después de R-07 sin utilizar el volumen ni los registros de la instalación anterior. Esta prueba se realizó **en el Codespace existente**, pero con un **proyecto Docker Compose separado**, que creó su propia red, contenedores y volumen de PostgreSQL.
+
+**Preparación:** primero se detuvieron los tres servicios del proyecto principal para liberar el puerto 8080, sin eliminar su volumen:
+
+```bash
+docker compose stop
+docker volume ls
+```
+
+En la salida inicial estaba el volumen `aci606-docker-rescue-catedra2_postgres_data`. Después se ejecutó el arranque usando otro nombre de proyecto:
+
+```bash
+docker compose -p aci606-prueba-limpia-20261122 up --build -d
+docker compose -p aci606-prueba-limpia-20261122 ps
+```
+
+**Resultados observados:**
+
+- Compose creó el volumen `aci606-prueba-limpia-20261122_postgres_data`, independiente del anterior.
+- Los contenedores de `db` y `backend` alcanzaron el estado `Up (healthy)`; `frontend` quedó `Up`.
+- La construcción e inicio informaron `db Healthy`, `backend Healthy` y `frontend Started`, **sin ejecutar manualmente** `docker compose start backend`.
+- La API respondió `HTTP/1.1 200 OK` a la verificación de salud y confirmó conexión con PostgreSQL.
+- El listado de registros devolvió `[]`, coherente con una base nueva que no recibió los datos previos.
+
+Comandos de verificación utilizados:
+
+```bash
+curl -i --max-time 10 http://127.0.0.1:8080/api/health
+curl -sS http://127.0.0.1:8080/api/items | python -m json.tool
+docker volume ls
+```
+
+Respuesta de salud observada:
+
+```json
+{"status":"ok","database":"reachable"}
+```
+
+**Conclusión de la prueba:** con la configuración posterior a R-07, PostgreSQL puede inicializarse sobre un volumen nuevo y la aplicación completa arranca automáticamente mediante un único `docker compose up --build -d` (en esta prueba, con `-p` para aislar el proyecto). Esta comprobación complementa la prueba de persistencia del primer Codespace: **una verifica la inicialización con almacenamiento nuevo y la otra verifica que los datos se conservan al recrear el contenedor con su volumen existente**.
+
+**Precaución:** no ejecutar `docker compose down -v` sobre el proyecto principal; ello podría eliminar el volumen con registros de las pruebas anteriores. Para detener únicamente la instancia de prueba se puede usar `docker compose -p aci606-prueba-limpia-20261122 stop`.
 
 ## 10. Seguridad y limitaciones
 
@@ -432,7 +476,7 @@ curl -i --max-time 10 http://127.0.0.1:8080/api/items
 
 Pruebas mínimas de la evaluación:
 
-- Arranque limpio con `docker compose up --build -d`.
+- Arranque limpio con `docker compose up --build -d`, incluyendo la validación adicional con un proyecto y volumen PostgreSQL nuevos (sección 9.2).
 - Comunicación de frontend, backend y PostgreSQL.
 - Persistencia del dato tras recrear el contenedor asociado.
 - Fallo controlado de un servicio.
