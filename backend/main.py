@@ -5,10 +5,9 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import create_engine, text
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://appuser:rescue123@db:5432/appdb",
-)
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise RuntimeError("La variable de entorno DATABASE_URL es obligatoria para iniciar el backend.")
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 app = FastAPI(title="ACI606 Docker Rescue API", version="1.0")
