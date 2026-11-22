@@ -137,7 +137,7 @@ curl -i --max-time 5 http://127.0.0.1:8080/api/health
 - **Comprobación:** `git check-ignore -v .env`, `docker compose config --quiet` y `git status --short` confirmaron exclusión, sintaxis y archivos versionados esperados. Tras `docker compose up -d --force-recreate`, se observaron los servicios `Up`, `/api/health` saludable y `Prueba ACI606` conservada.
 - **Trazabilidad Git:** commit `6a191bc` — `feat(config): externalizar variables de entorno`.
 - **Evidencia documentada:** `docker compose config --quiet` terminó sin errores; la verificación de `.gitignore` confirmó que `.env` estaba excluido, y la API mantuvo el acceso a PostgreSQL tras recrear los contenedores.
-- **Limitación identificada:** aunque Compose obtiene `DATABASE_URL` desde `.env`, `backend/main.py` conserva una URL de conexión de respaldo con una contraseña de pruebas. En la ejecución actual de Compose se utiliza la variable configurada, pero sería más seguro retirar ese valor por defecto. Además, la externalización no elimina las credenciales que aparecieron en commits anteriores; no deben reutilizarse fuera de este ejercicio.
+- **Mejora de seguridad posterior:** después de las pruebas se eliminó de `backend/main.py` la URL predeterminada con contraseña de laboratorio. El backend ahora requiere explícitamente `DATABASE_URL` desde el entorno, suministrada por Compose. Cambio publicado en el commit `f6c261f` (`fix(security): exigir DATABASE_URL sin credenciales embebidas`). Esto no elimina las credenciales que pudieron aparecer en commits anteriores; no deben reutilizarse fuera del ejercicio.
 
 ### M-03 — Healthcheck del backend
 
