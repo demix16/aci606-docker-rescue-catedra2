@@ -127,7 +127,7 @@ curl -i --max-time 5 http://127.0.0.1:8080/api/health
 - **Implementación:** `compose.yaml` declara el volumen `postgres_data` y lo monta en `/var/lib/postgresql/data` del servicio `db`.
 - **Migración controlada:** se creó el respaldo lógico `respaldo_antes_volumen.sql` con `pg_dump`; se detuvieron frontend y backend, se recreó `db` con el volumen y se restauró el respaldo con `psql`.
 - **Comprobación:** `SELECT id, name, created_at FROM items ORDER BY id;` mostró el registro ID 1, `Prueba ACI606`. Después de `docker compose up -d --no-deps --force-recreate db`, el mismo registro permaneció. La API volvió a listarlo tras levantar los servicios.
-- **Trazabilidad Git:** commit `7eb06c1` — `feat(persistencia): agregar volumen nombrado PostgreSQL`.
+- **Trazabilidad Git:** commit `7be06c1` — `feat(persistencia): agregar volumen nombrado PostgreSQL`.
 - **Evidencia documentada:** la consulta SQL y la respuesta de `GET /api/items` mostraron el registro después de recrear el servicio `db`; `docker volume ls` confirmó la presencia del volumen del proyecto.
 - **Observación real:** durante la migración se ejecutó una segunda restauración por error y apareció `relation "items" already exists`. La primera restauración ya había creado la tabla y los datos; después comprobamos que el registro seguía presente.
 
