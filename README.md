@@ -48,19 +48,22 @@ aci606-docker-rescue-catedra2/
 │   ├── index.html            # Interfaz web y solicitudes fetch
 │   └── nginx.conf            # Nginx y proxy de /api/
 ├── compose.yaml              # Servicios, volumen, healthchecks y dependencias saludables
-├── .env.example              # Plantilla de variables, sin secretos reales
+├── config/
+│   └── demo.env              # Credenciales PUBLICAS de laboratorio, solo demostracion
+├── .env.example              # Plantilla para personalizar, sin secretos reales
 ├── .gitignore                # Excluye .env y el respaldo SQL local
 ├── BITACORA.md               # Diagnóstico y reparaciones R-01 a R-07
 └── README.md                 # Manual de construcción, uso y verificación
 ```
 
-El archivo `.env` es **local y obligatorio para la ejecución**; no se publica en Git. Un respaldo local denominado `respaldo_antes_volumen.sql` puede existir durante las pruebas, pero no forma parte del paquete reproducible.
+El archivo `config/demo.env` contiene **credenciales públicas y descartables, exclusivamente para la demostración académica**; no son secretos ni deben usarse en producción. `.env` es **opcional** para el arranque: si se crea localmente, sus variables tienen prioridad sobre `config/demo.env`. Se mantiene excluido de Git. Un respaldo local denominado `respaldo_antes_volumen.sql` puede existir durante las pruebas, pero no forma parte del paquete reproducible.
 
 ## 2. Requisitos y entorno de ejecución
 
 - **Opción recomendada:** GitHub Codespaces con Docker Engine y Docker Compose disponibles.
 - **Alternativa:** entorno Linux, macOS o Windows con Docker Engine/Desktop, Docker Compose V2 o compatible y acceso a una terminal.
-- Acceso al repositorio y permiso para crear el archivo local `.env`.
+- Docker Compose **v2.24.0 o posterior**, por la opción `env_file.required: false` para un `.env` local opcional.
+- Acceso al repositorio; **no es necesario crear `.env`** para la demostración. Solo se crea si se desea personalizar las credenciales.
 - Puerto 8080 disponible para acceder al frontend.
 
 Desde la raíz del repositorio (carpeta donde está `compose.yaml`), verificar:
@@ -78,13 +81,22 @@ Los comandos siguientes están pensados para una terminal **Bash** en Codespaces
 
 > **No se requiere una base de datos externa ni un archivo SQL previo.** PostgreSQL crea el almacén inicial; la aplicación genera la tabla `items` durante el arranque del backend.
 
-### 3.1 Crear el archivo de entorno
+### 3.1 Arranque sin preparación de variables (evaluación)
+
+El archivo `compose.yaml` carga `config/demo.env` mediante `env_file` para los servicios `db` y `backend`. Este archivo se versiona deliberadamente porque contiene **solo credenciales de ejemplo, públicas y descartables**. No requiere `.env` ni cambios manuales: desde un Codespace limpio, ejecutar directamente:
+
+```bash
+docker compose up --build -d
+docker compose ps
+```
+
+**Opcional, solo si deseas personalizar los valores:** crear `.env` desde `.env.example`:
 
 ```bash
 cp .env.example .env
 ```
 
-Abrir `.env` y sustituir **ambas** apariciones de `CAMBIAR_PASSWORD` por una contraseña propia para este entorno. Ejemplo de estructura (los marcadores siguientes **no** son credenciales operativas):
+Abrir `.env` y sustituir **ambas** apariciones de `CAMBIAR_PASSWORD` por una contraseña propia para ese entorno. Cuando existe, sus valores sobrescriben las variables de demostración porque `env_file` los carga en ese orden. Ejemplo de estructura (los marcadores siguientes **no** son credenciales operativas):
 
 ```dotenv
 POSTGRES_USER=appuser
@@ -100,16 +112,17 @@ DATABASE_URL=postgresql://appuser:REEMPLAZAR_CON_PASSWORD_LOCAL@db:5432/appdb
 - La contraseña de `DATABASE_URL` **debe coincidir** con `POSTGRES_PASSWORD` para un volumen recién inicializado.
 - Si se utiliza una contraseña con caracteres reservados de URL (`@`, `:`, `/`, `%`, etc.), codificar esos caracteres correctamente en el componente de contraseña de `DATABASE_URL`.
 
-**Importante para volúmenes existentes:** modificar `POSTGRES_PASSWORD` en `.env` **no cambia automáticamente** la contraseña de una instancia PostgreSQL ya inicializada. No cambies credenciales sobre un volumen con datos sin planificar su actualización en la base de datos.
+**Importante para volúmenes existentes:** modificar `POSTGRES_PASSWORD` en `.env` **no cambia automáticamente** la contraseña de una instancia PostgreSQL ya inicializada. No cambies credenciales sobre un volumen con datos sin planificar su actualización en la base de datos. En particular, **si tu Codespace ya tiene un volumen inicializado con otras credenciales, conserva tu `.env` anterior**. La prueba de arranque sin `.env` debe realizarse en un Codespace completamente nuevo sin volumen previo. Los valores de `config/demo.env` son públicos, no operativos fuera de este laboratorio.
 
 ### 3.2 Revisar configuración sin mostrar secretos
 
 ```bash
-git check-ignore -v .env
 docker compose config --quiet
+# Solo si has creado un .env local:
+git check-ignore -v .env
 ```
 
-El primer comando debe confirmar que Git ignora `.env`; el segundo no debe reportar errores. **Evitar publicar la salida completa de `docker compose config`**, ya que puede revelar valores resueltos de entorno.
+`docker compose config --quiet` no debe reportar errores. Si existe `.env`, `git check-ignore -v .env` debe confirmar que Git lo ignora. **Evitar publicar la salida completa de `docker compose config`**, ya que puede revelar la configuración resuelta (incluidas credenciales privadas si se personalizaron).
 
 ### 3.3 Construir e iniciar el sistema
 
@@ -394,7 +407,7 @@ curl -i --max-time 10 http://127.0.0.1:8080/api/items
 ### 9.1 Prueba desde un Codespace limpio (entrega)
 
 1. Abrir una instancia nueva de Codespaces para la rama `main`.
-2. Crear `.env` a partir de `.env.example` y completar los valores (el archivo `.env` no está versionado).
+2. **No crear `.env` ni configurar credenciales** en la demostración: `config/demo.env` ya proporciona parámetros descartables. Si el Codespace tiene un volumen PostgreSQL anterior, no se considera un arranque limpio; usar uno nuevo para esta prueba.
 3. Ejecutar **desde la raíz del repositorio**:
 
    ```bash
@@ -414,7 +427,7 @@ curl -i --max-time 10 http://127.0.0.1:8080/api/items
 
 **Resultado real de la validación (22-11-2026):** en un Codespace nuevo, la primera ejecución dejó el backend detenido porque intentó conectarse a PostgreSQL demasiado pronto. Después de aplicar la reparación R-07 y reiniciar los contenedores conservando el volumen, se ejecutó nuevamente `docker compose up --build -d`: la terminal informó `Container ...-db-1 Healthy`, `Container ...-backend-1 Healthy` y `Container ...-frontend-1 Started`. `docker compose ps` confirmó ambos healthchecks y `curl` a `/api/health` devolvió `HTTP/1.1 200 OK`. El commit final de esa reparación es `c7535dd`.
 
-**Nota sobre el criterio del profesor:** el comando obligatorio de arranque sigue siendo `docker compose up --build -d`. Crear `.env` a partir de `.env.example` es una preparación local indispensable, ya que el repositorio no distribuye contraseñas operativas. La primera verificación después de R-07 se realizó en el Codespace nuevo con la base ya inicializada durante los intentos anteriores. Por tanto, ese resultado por sí solo no demostraba el arranque sobre un volumen vacío. **La prueba adicional con un proyecto Compose independiente y un volumen nuevo se realizó posteriormente y está documentada en la sección 9.2.** El primer intento sin R-07 falló y no debe presentarse como exitoso.
+**Nota sobre el criterio del profesor:** ahora el comando obligatorio de arranque sigue siendo `docker compose up --build -d`, pero la configuración de demostración está versionada en `config/demo.env` y ya no requiere crear `.env`. Esta mejora se incorporó después de las pruebas documentadas el 22-11-2026; **no debe confundirse con una prueba nueva efectivamente ejecutada**. La primera verificación posterior a R-07 reutilizó un volumen inicializado. La prueba adicional con un proyecto y volumen nuevos está documentada en la sección 9.2 y **correspondió a la configuración anterior que utilizaba `.env`**.
 
 ### 9.2 Validación adicional con un volumen PostgreSQL nuevo (22-11-2026)
 
@@ -460,9 +473,18 @@ Respuesta de salud observada:
 
 **Precaución:** no ejecutar `docker compose down -v` sobre el proyecto principal; ello podría eliminar el volumen con registros de las pruebas anteriores. Para detener únicamente la instancia de prueba se puede usar `docker compose -p aci606-prueba-limpia-20261122 stop`.
 
+
+### 9.3 Cambio posterior: modo de demostración sin `.env` (pendiente de prueba en Codespace limpio)
+
+Con posterioridad a las pruebas del 22-11-2026, se añadió `config/demo.env` con credenciales **públicas, descartables y exclusivas de este ejercicio**, y se actualizó `compose.yaml` para cargarlo mediante `env_file`. Un `.env` local puede sobrescribir esos valores, y no forma parte de Git. La aplicación original, los tres servicios, el volumen, las rutas y los healthchecks no cambiaron. Esta configuración requiere Docker Compose **v2.24.0+** para el archivo opcional.
+
+**Prueba pendiente de registrar como resultado real:** crear un Codespace nuevo sin `.env` ni volumen previo, ejecutar exactamente `docker compose up --build -d` y `docker compose ps`, comprobar salud, y luego consultar `curl -i --max-time 10 http://127.0.0.1:8080/api/health`. Hasta recibir esa salida no se considera validada esta modificación. La prueba de volumen nuevo del 22-11-2026 sigue siendo válida como evidencia histórica de R-07, bajo la configuración anterior.
+
+**Seguridad:** `config/demo.env` es solo para una práctica académica aislada; **no debe reutilizarse para despliegues públicos ni con datos reales**. Para un entorno privado, crear `.env` con credenciales propias y verificar compatibilidad con el volumen PostgreSQL existente.
+
 ## 10. Seguridad y limitaciones
 
-- `.env` y los respaldos SQL deben mantenerse fuera de Git. El archivo `.env.example` solo incluye marcadores.
+- `.env` privado y los respaldos SQL deben mantenerse fuera de Git. El archivo `.env.example` solo incluye marcadores; `config/demo.env` incluye credenciales públicas y descartables, expresamente restringidas a este laboratorio.
 - Las credenciales de laboratorio utilizadas durante la reparación quedaron anteriormente visibles en commits/capturas. **No deben reutilizarse en otros servicios**. Si son credenciales reales, requieren rotación y tratamiento del historial expuesto.
 - **Corrección de seguridad aplicada:** se eliminó de `backend/main.py` la URL de conexión predeterminada que contenía credenciales de laboratorio. El backend ahora exige `DATABASE_URL` mediante una variable de entorno y falla explícitamente si no está configurada. Commit `f6c261f`. Esta corrección no borra las credenciales registradas en commits anteriores.
 - PostgreSQL y FastAPI no se publican directamente en puertos del host en la configuración actual; se accede a la API a través de Nginx.
@@ -471,7 +493,7 @@ Respuesta de salud observada:
 
 ## 11. Evidencias y entregables de Cátedra 2
 
-**Repositorio GitHub:** código recuperado, Dockerfiles, `compose.yaml`, `.env.example`, README y commits descriptivos.  
+**Repositorio GitHub:** código recuperado, Dockerfiles, `compose.yaml`, `config/demo.env` (solo laboratorio), `.env.example`, README y commits descriptivos.  
 **Informe PDF:** arquitectura inicial y final, metodología de diagnóstico, bitácora por incidencia con causa y verificación, pruebas obligatorias, mejoras y conclusiones.
 
 Pruebas mínimas de la evaluación:
