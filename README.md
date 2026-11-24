@@ -427,7 +427,7 @@ curl -i --max-time 10 http://127.0.0.1:8080/api/items
 
 **Resultado real de la validación (22-11-2026):** en un Codespace nuevo, la primera ejecución dejó el backend detenido porque intentó conectarse a PostgreSQL demasiado pronto. Después de aplicar la reparación R-07 y reiniciar los contenedores conservando el volumen, se ejecutó nuevamente `docker compose up --build -d`: la terminal informó `Container ...-db-1 Healthy`, `Container ...-backend-1 Healthy` y `Container ...-frontend-1 Started`. `docker compose ps` confirmó ambos healthchecks y `curl` a `/api/health` devolvió `HTTP/1.1 200 OK`. El commit final de esa reparación es `c7535dd`.
 
-**Nota sobre el criterio del profesor:** ahora el comando obligatorio de arranque sigue siendo `docker compose up --build -d`, pero la configuración de demostración está versionada en `config/demo.env` y ya no requiere crear `.env`. Esta mejora se incorporó después de las pruebas documentadas el 22-11-2026; **no debe confundirse con una prueba nueva efectivamente ejecutada**. La primera verificación posterior a R-07 reutilizó un volumen inicializado. La prueba adicional con un proyecto y volumen nuevos está documentada en la sección 9.2 y **correspondió a la configuración anterior que utilizaba `.env`**.
+**Nota sobre el criterio del profesor:** el comando obligatorio sigue siendo `docker compose up --build -d`. La configuración de demostración versionada en `config/demo.env` ya no exige crear `.env`. **La prueba de esta versión se ejecutó posteriormente en otro Codespace nuevo y quedó documentada en la sección 9.3.** Las pruebas del 22-11-2026 siguen siendo evidencia histórica de la reparación R-07: la primera reutilizó un volumen inicializado y la segunda probó un volumen nuevo con la configuración anterior que utilizaba `.env`.
 
 ### 9.2 Validación adicional con un volumen PostgreSQL nuevo (22-11-2026)
 
@@ -474,11 +474,19 @@ Respuesta de salud observada:
 **Precaución:** no ejecutar `docker compose down -v` sobre el proyecto principal; ello podría eliminar el volumen con registros de las pruebas anteriores. Para detener únicamente la instancia de prueba se puede usar `docker compose -p aci606-prueba-limpia-20261122 stop`.
 
 
-### 9.3 Cambio posterior: modo de demostración sin `.env` (pendiente de prueba en Codespace limpio)
+### 9.3 Validación final: arranque desde Codespace nuevo sin `.env` (23-11-2026, Chile)
 
 Con posterioridad a las pruebas del 22-11-2026, se añadió `config/demo.env` con credenciales **públicas, descartables y exclusivas de este ejercicio**, y se actualizó `compose.yaml` para cargarlo mediante `env_file`. Un `.env` local puede sobrescribir esos valores, y no forma parte de Git. La aplicación original, los tres servicios, el volumen, las rutas y los healthchecks no cambiaron. Esta configuración requiere Docker Compose **v2.24.0+** para el archivo opcional.
 
-**Prueba pendiente de registrar como resultado real:** crear un Codespace nuevo sin `.env` ni volumen previo, ejecutar exactamente `docker compose up --build -d` y `docker compose ps`, comprobar salud, y luego consultar `curl -i --max-time 10 http://127.0.0.1:8080/api/health`. Hasta recibir esa salida no se considera validada esta modificación. La prueba de volumen nuevo del 22-11-2026 sigue siendo válida como evidencia histórica de R-07, bajo la configuración anterior.
+**Prueba ejecutada y evidenciada por el equipo:** se abrió un Codespace nuevo desde la rama `main` y se inició la aplicación con `docker compose up --build -d`. En la captura posterior de `docker compose ps`, los contenedores figuraron como recién creados (aproximadamente 35–39 segundos), con `db` y `backend` en estado **`Up (healthy)`** y `frontend` en estado **`Up`**, publicando el puerto **8080**. La consulta `curl -i --max-time 10 http://127.0.0.1:8080/api/health` devolvió **`HTTP/1.1 200 OK`**, encabezado `Server: nginx/1.27.5` y el cuerpo `{"status":"ok","database":"reachable"}`. El encabezado HTTP registró **`Tue, 24 Nov 2026 02:26:04 GMT`** (23-11-2026 en Chile).
+
+**Comprobación adicional de externalización:** en ese Codespace el equipo ejecutó:
+
+```bash
+if [ -f .env ]; then echo "Existe .env"; else echo "No existe .env"; fi
+```
+
+La salida fue **`No existe .env`**. Por tanto, **quedó verificado el arranque y la conexión a la base de datos sin crear un `.env` local**. La evidencia procede de las capturas de terminal compartidas por el equipo; la inspección directa del volumen no formó parte de esta última secuencia. La persistencia y la inicialización con volumen PostgreSQL distinto ya se comprobaron por separado el 22-11-2026 (secciones 5 y 9.2), con la configuración anterior.
 
 **Seguridad:** `config/demo.env` es solo para una práctica académica aislada; **no debe reutilizarse para despliegues públicos ni con datos reales**. Para un entorno privado, crear `.env` con credenciales propias y verificar compatibilidad con el volumen PostgreSQL existente.
 
@@ -498,7 +506,7 @@ Con posterioridad a las pruebas del 22-11-2026, se añadió `config/demo.env` co
 
 Pruebas mínimas de la evaluación:
 
-- Arranque limpio con `docker compose up --build -d`, incluyendo la validación adicional con un proyecto y volumen PostgreSQL nuevos (sección 9.2).
+- Arranque limpio con `docker compose up --build -d`, incluido el Codespace nuevo **sin `.env`**, tres servicios operativos y `/api/health` HTTP 200 (sección 9.3); adicionalmente, prueba anterior con volumen PostgreSQL nuevo (sección 9.2).
 - Comunicación de frontend, backend y PostgreSQL.
 - Persistencia del dato tras recrear el contenedor asociado.
 - Fallo controlado de un servicio.
