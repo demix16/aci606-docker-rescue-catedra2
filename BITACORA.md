@@ -16,7 +16,7 @@
 - **Base de datos:** PostgreSQL 16, servicio Compose `db`, puerto 5432 interno.
 - **Comunicación:** navegador/cliente → Nginx (`/api/`) → FastAPI → PostgreSQL.
 - **Persistencia final:** volumen nombrado `postgres_data` montado en `/var/lib/postgresql/data`.
-- **Configuración:** `compose.yaml` obtiene parámetros de `.env`; `.env.example` sirve de plantilla pública.
+- **Configuración:** la versión inicial obtuvo variables desde un `.env` privado; después se incorporó `config/demo.env` (valores públicos de práctica) y un `.env` opcional con prioridad para personalización. `.env.example` sigue siendo la plantilla pública.
 
 ## 2. Método de diagnóstico utilizado
 
@@ -133,7 +133,7 @@ curl -i --max-time 5 http://127.0.0.1:8080/api/health
 
 ### M-02 — Externalización de configuración
 
-- **Implementación:** `compose.yaml` consume `DATABASE_URL`, `POSTGRES_USER`, `POSTGRES_PASSWORD` y `POSTGRES_DB` desde variables externas; `.env` está excluido en `.gitignore`; `.env.example` contiene marcadores de ejemplo.
+- **Implementación original:** `compose.yaml` consume `DATABASE_URL`, `POSTGRES_USER`, `POSTGRES_PASSWORD` y `POSTGRES_DB` desde variables externas; `.env` está excluido en `.gitignore`; `.env.example` contiene marcadores de ejemplo. **Mejora posterior para evaluación:** se añadió `config/demo.env` (credenciales públicas de laboratorio) y se configuró `env_file` con `.env` opcional y prioritario.
 - **Comprobación:** `git check-ignore -v .env`, `docker compose config --quiet` y `git status --short` confirmaron exclusión, sintaxis y archivos versionados esperados. Tras `docker compose up -d --force-recreate`, se observaron los servicios `Up`, `/api/health` saludable y `Prueba ACI606` conservada.
 - **Trazabilidad Git:** commit `6a191bc` — `feat(config): externalizar variables de entorno`.
 - **Evidencia documentada:** `docker compose config --quiet` terminó sin errores; la verificación de `.gitignore` confirmó que `.env` estaba excluido, y la API mantuvo el acceso a PostgreSQL tras recrear los contenedores.
@@ -149,7 +149,7 @@ curl -i --max-time 5 http://127.0.0.1:8080/api/health
 
 ### M-04 — README reproducible
 
-- **Implementación:** `README.md` técnico con arquitectura, requisitos, `.env`, construcción, API REST, persistencia, diagnóstico, fallo controlado y recuperación.
+- **Implementación:** `README.md` técnico con arquitectura, requisitos, configuración externalizada (demostración sin `.env` y personalización opcional), construcción, API REST, persistencia, diagnóstico, fallo controlado y recuperación.
 - **Comprobación:** se verificó la presentación de tablas y diagrama Mermaid en vista previa; el contenido de la interrupción documenta los resultados observados reales (`curl (28)` y `499` en Nginx) y la recuperación.
 - **Trazabilidad Git:** commit `baabd2b` — `docs(readme): documentar arquitectura pruebas y recuperacion`.
 - **Evidencia documentada:** archivo `README.md` publicado en GitHub y commit `baabd2b`; se comprobó también la representación del diagrama Mermaid y la explicación del fallo controlado. Tras R-07 se actualizó el procedimiento de arranque para reflejar los dos healthchecks y la prueba real en un Codespace nuevo.
@@ -209,3 +209,14 @@ git status --short
 **Registro adicional del historial:** la reparación R-07 se registró en el commit `c7535dd`, publicado en `main` desde el Codespace nuevo.
 
 **Cierre de la bitácora.** Con las siete reparaciones y las mejoras descritas, la aplicación quedó operativa: el frontend se comunicó con la API, FastAPI informó acceso a PostgreSQL, el registro de prueba persistió tras recrear los contenedores y el backend pudo recuperarse después de una interrupción. La prueba posterior desde otro Codespace permitió detectar y corregir el inicio prematuro del backend (R-07). Con los healthchecks y dependencias actualizados, el arranque mediante `docker compose up --build -d` completó los tres servicios y la API devolvió HTTP 200 sin intervención manual en el Codespace nuevo, reutilizando inicialmente su volumen ya creado. Además, una prueba separada con el proyecto Compose `aci606-prueba-limpia-20261122` confirmó el funcionamiento con otro volumen PostgreSQL vacío: `db` y `backend` saludables, frontend activo, HTTP 200 y una lista de registros inicialmente vacía. Las pruebas de persistencia con el registro original corresponden al primer Codespace, no a una transferencia de datos entre Codespaces.
+
+
+## 7. Ajuste posterior de reproducibilidad para la entrega (sin alterar R-01 a R-07)
+
+- **Motivo:** la configuración anterior requería crear manualmente un `.env` antes de ejecutar los dos comandos de la pauta en un Codespace limpio. Ese requisito previo podía dificultar la comprobación directa del docente.
+- **Archivos:** `config/demo.env` (nuevo), `compose.yaml` (actualizado) y `README.md` (instrucciones). No se reemplazó la aplicación ni se modificaron `backend/main.py`, Nginx, las redes, los healthchecks o el volumen `postgres_data`.
+- **Cambio aplicado:** `db` y `backend` reciben variables desde `config/demo.env`; si existe un archivo privado `.env`, este tiene precedencia gracias a `env_file` con `required: false` (Docker Compose v2.24+). Se retiró la interpolación obligatoria `${VARIABLE:?...}` del YAML para permitir que `env_file` suministre las variables directamente al contenedor.
+- **Justificación:** conserva la externalización, evita contraseñas en el código Python y elimina la necesidad de editar archivos antes de la prueba de arranque limpio. Las credenciales de demostración están **deliberadamente publicadas y son descartables**, solo para este ejercicio académico y nunca para producción.
+- **Verificación documental:** se comprobaron los cambios versionados y la coherencia de los archivos. **La ejecución real sin `.env` y con volumen nuevo todavía está pendiente de comprobarse en un Codespace nuevo**: no se declara como prueba superada en esta bitácora. Las pruebas P-01 a P-06 del 22-11-2026 corresponden a la configuración anterior.
+- **Precaución:** si un volumen PostgreSQL previo tiene una contraseña distinta, se debe conservar el `.env` anterior; no borrar volúmenes con datos. Para la prueba definitiva usar un Codespace limpio, ejecutar `docker compose up --build -d`, `docker compose ps` y comprobar la API.
+- **Reversión:** la rama `respaldo-antes-arranque-limpio-20261123` conserva el proyecto antes de estos cambios, en el commit `b7d61fc`.
